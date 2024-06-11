@@ -34,20 +34,20 @@ class DNSQuestion:
 
 @dataclass
 class DNSRecord:
-    name: int
+    name: str
     type: int
     class_: int
     ttl: int
     length: int
-    data: int
+    data: str
 
 
-def parse_header(reader):
+def parse_header(reader: BytesIO):
     header_fields = struct.unpack('!HHHHHH', reader.read(12))
     return DNSHeader(*header_fields)
 
 
-def parse_domain_name(reader):
+def parse_domain_name(reader: BytesIO):
     labels = []
     while True:
         length_byte = reader.read(1)
@@ -69,21 +69,21 @@ def parse_domain_name(reader):
     return ".".join(labels)
 
 
-def parse_question(reader):
+def parse_question(reader: BytesIO):
     qname = parse_domain_name(reader)
     data = reader.read(4)
     qtype, qclass = struct.unpack("!HH", data)
     return DNSQuestion(qname, qtype, qclass)
 
 
-def parse_questions(reader, cnt):
+def parse_questions(reader: BytesIO, cnt: int):
     questions = []
     for _ in range(cnt):
         questions.append(parse_question(reader))
     return questions
 
 
-def parse_record(reader):
+def parse_record(reader: BytesIO):
     name = parse_domain_name(reader)
     data = reader.read(10)
     type, class_, ttl, length = struct.unpack("!HHIH", data)
@@ -102,7 +102,7 @@ def parse_records(reader, cnt):
     return records
 
 
-def parse_response(bytes, ns):
+def parse_response(bytes: bytes, ns: bool):
     reader = BytesIO(bytes)
     header = parse_header(reader)
     questions = parse_questions(reader, header.qdcount)
