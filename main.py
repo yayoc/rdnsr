@@ -54,7 +54,7 @@ def parse_domain_name(reader):
         length = length_byte[0]
         if length == 0:
             break
-        if length >= 192:
+        if length >= 192:  # 11000000
             # Handle compression
             pointer_byte = reader.read(1)
             pointer = struct.unpack('!H', length_byte + pointer_byte)[0]
@@ -90,7 +90,7 @@ def parse_record(reader):
     if type == 1:
         data = socket.inet_ntoa(reader.read(length))
     else:
-        data = reader.read(length)
+        data = parse_domain_name(reader)
 
     return DNSRecord(name, type, class_, ttl, length, data)
 
@@ -102,13 +102,16 @@ def parse_records(reader, cnt):
     return records
 
 
-def parse_response(bytes):
+def parse_response(bytes, ns):
     reader = BytesIO(bytes)
     header = parse_header(reader)
     questions = parse_questions(reader, header.qdcount)
-    records = parse_records(reader, header.ancount)
-
-    print(header, questions, records)
+    if ns:
+        cnt = header.nscount
+    else:
+        cnt = header.ancount
+    records = parse_records(reader, cnt)
+    return header, questions, records
 
 
 def build_query(domain: str):
@@ -117,19 +120,17 @@ def build_query(domain: str):
     return header.to_bytes() + question.to_bytes()
 
 
-def send_query(domain: str, server: str, port: int = 53):
+def send_query(domain: str, server: str, port: int = 53, ns=False):
     query = build_query(domain)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     try:
-        print("query: ", query)
+        print("query to ", server)
         sock.sendto(query, (server, port))
         # DNS specification mandates a maximum of 512 bytes for all messages
         response, _ = sock.recvfrom(512)
-        print("resonse: ", response)
-        parse_response(response)
-        return response
+        return parse_response(response, ns)
     finally:
         sock.close()
 
@@ -140,7 +141,38 @@ def main():
         sys.exit(1)
     domain = sys.argv[1]
 
-    send_query(domain, '8.8.8.8', 53)
+    root_server = '198.41.0.4'
+    _, _, ns_records = send_query(domain, root_server, 53, True)
+
+    if len(ns_records) == 0:
+        print("No records found in the root server.")
+        return
+
+    tld_server = None
+    for r in ns_records:
+        if r.type == 2:
+            tld_server = r.data
+            break
+
+    if tld_server is None:
+        print("No TLD name server found")
+        return
+
+    _, _, ns_records = send_query(domain, tld_server, 53, True)
+
+    authority_server = None
+    for r in ns_records:
+        if r.type == 2:
+            authority_server = r.data
+            break
+
+    if authority_server is None:
+        print("No authority server found")
+        return
+
+    _, _, records = send_query(domain, authority_server, 53)
+    for r in records:
+        print(r)
 
 
 if __name__ == "__main__":
